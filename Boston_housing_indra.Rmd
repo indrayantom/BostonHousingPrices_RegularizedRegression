@@ -1,0 +1,373 @@
+---
+title: 'Boston Housing Prices : Regularized Regression'
+author: "Indra Yanto"
+date: "12/16/2021"
+output:
+  html_document:
+    df_print: paged
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 0. Setting the work environment
+First, import all the libraries needed 
+```{r,warning=FALSE,message=FALSE}
+library(tidyverse) #Data manipulation
+library(caTools) #Data splitting
+library(psych) #Pairplot extraction
+library(glmnet) #Regularized Regression model
+```
+## 1. Import and split the data
+The data is about predicting housing price (medv) in Boston city. All the features can be grouped into :
+
+- Dependent variable: medv, the median value of owner-occupied homes (in thousands of dollars).
+- Structural variables indicating the house characteristics: rm (average number of rooms “in owner units”) and age (proportion of owner-occupied units built prior to 1940).
+- Neighborhood variables: crim (crime rate), zn (proportion of residential areas), indus (proportion of non-retail business area), chas (river limitation), tax (cost of public services in each community), ptratio (pupil-teacher ratio), black (the black proportion of population) and lstat (percent of lower status of the population).
+- Accesibility variables: dis (distances to five Boston employment centers) and rad (accessibility to radial highways – larger index denotes better accessibility).
+- Air pollution variable: nox, the annual concentration of nitrogen oxide (in parts per ten million).
+
+ Description of each feature : 
+ 
+- crim : per capita crime rate by town
+- zn : proportion of residential land zoned for lots over 25,000 sq. ft.
+- indus : proportion of non-retail business acres per town
+- chas : Charles River dummy variable (= 1 if tract bounds river; 0 otherwise)
+- nox : nitric oxides concentration (parts per 10 million)
+- rm : average number of rooms per dwelling
+- age  : proportion of owner-occupied units built prior to 1940
+- dis : weighted distances to five Boston employment centers
+- rad : index of accessibility to radial highways
+- tax : full-value property-tax rate per $10,000
+- ptratio : pupil-teacher ratio by town
+- black : the proportion of blacks by town
+- lstat : lower status percentage of the population
+- medv : median value of owner-occupied homes in $1000's (response variable)
+
+
+
+```{r}
+df=read.csv('D:\\Learning_r\\Cleaning_dATA\\Cleaning_Data_Project\\Project_Cleaning\\HW_DAY20_INDRA\\bostonhousing.csv')
+df
+```
+Checking for each feature data type :
+```{r}
+glimpse(df)
+```
+Checking for each feature stats :
+```{r}
+summary(df)
+```
+Checking for missing values :
+```{r}
+colSums(is.na(df))
+```
+No missing values found!
+
+
+After checking process is done, let's split the data into 80% train-validate (80% train -- 20%validate) and 20% test. The reason of this proportion is because the regularized linear regression will be applied on predicting medv.
+
+```{r}
+# First split
+set.seed(123)
+splitter_trainval_test=sample.split(df$medv,SplitRatio = 0.80)
+train_val=subset(df,splitter_trainval_test==TRUE)
+test=subset(df,splitter_trainval_test==FALSE)
+# Second split
+splitter_train_val=sample.split(train_val$medv,SplitRatio = 0.80)
+train=subset(train_val,splitter_train_val==TRUE)
+validate=subset(train_val,splitter_train_val==FALSE)
+```
+
+Check all the splitted dataset:
+```{r}
+train
+```
+```{r}
+validate
+```
+```{r}
+test
+```
+## 2. Draw correlation plot on training data and perform feature selection on highly correlated features
+
+One important assumption of linear regression is no multicollinearity found in the dataset. To analyze this assumption and understand the relationship of each feature to the medv, the target variable, pairplot will be drawed.
+```{r,fig.width=12,fig.height=12}
+pairs.panels(train, 
+             method = "pearson", # correlation method
+             hist.col = "#00AFBB",
+             density = TRUE,  # show density plots
+             ellipses = TRUE # show correlation ellipses
+)
+```
+Interpretation of the pairplot :
+
+- Based on pearson method, lstat, rm, ptratio, indus and tax are 5 variables with highest absolute correlation values to the targest variable medv.
+- For Structural attributes, one can see that as the number of rooms increases, the prices also increases. Another takeaway is older houses/ neighborhoods usually cost lower.
+- For Neighborhood and Accessibility attributes, crim, indus, rad, tax, ptratio and lstat have negative correlation to the housing prices, meanwhile zn, dis, and black have moderate positive correlation. Or in other words, neighborhood with high crime rate rate, higher pupil to teacher ratio (lower education quality), higher tax, higher industrial  proportion zone, more lower class citizen, and higher index of highway accessibility tend to cost lower meanwhile neighborhood with bigger proportion of residential area tends to cost higher.
+- Multicollinearity is found within the dataset as rad is highly correlated (>= 0.80) to the tax variable, i.e 0.90 . To avoid that phenomenon, the rad variable will be dropped since tax has higher correlation to the target variable (-0.53).
+- Neighborhood with higher air pollution level tends to cost lower.
+
+The key takeaway from this process is right now, we can exclude rad since it has high correlation value (0.90) to tax. Tax is retained because it has higher correlation value to the target variable.
+
+Exclude rad from all datasets
+```{r}
+train = train %>% select(-rad)
+validate = validate %>% select(-rad)
+test = test %>% select(-rad)
+```
+
+## 3. Fit Ridge and LASSO  linear regression models to training data with lambda : 0.01 , 0.1, 1, 10
+
+Prepare the x and y :
+```{r}
+x <- model.matrix(medv ~ ., train)[,-1]
+y <-  train$medv 
+```
+
+Fit the ridge model :
+```{r}
+ridge_pointzeroone=glmnet(x,y,alpha = 0, lambda=0.01)
+ridge_pointone=glmnet(x,y,alpha = 0, lambda=0.1)
+ridge_one=glmnet(x,y,alpha = 0, lambda=1)
+ridge_ten=glmnet(x,y,alpha = 0, lambda=10)
+```
+
+Fit the LASSO model:
+```{r}
+lasso_pointzeroone=glmnet(x,y,alpha = 1, lambda=0.01)
+lasso_pointone=glmnet(x,y,alpha = 1, lambda=0.1)
+lasso_one=glmnet(x,y,alpha = 1, lambda=1)
+lasso_ten=glmnet(x,y,alpha = 1, lambda=10)
+```
+
+## 4. Evaluate the models on the validation data based on RMSE metric and choose the best lambda for each models
+
+Define functions for MAE, MAPE, and RMSE metrics
+```{r}
+mae=function(y_actual,y_predict){
+  result=mean(abs(y_actual-y_predict))
+  return(result)
+}
+mape=function(y_actual,y_predict){
+  result=mean(abs(y_actual-y_predict)/y_actual)*100
+  return(result)
+}
+rmse=function(y_actual,y_predict){
+  result=sqrt(mean((y_actual - y_predict)^2))
+  return(result)
+}
+```
+
+Evaluate the best lambda for each model based on training dataset
+```{r}
+x_validate <- model.matrix(medv ~ ., validate)[,-1]
+y_validate <-  validate$medv 
+```
+
+For ridge model :
+```{r}
+y_rigde_pointzeroone=predict(ridge_pointzeroone,x_validate)
+print(rmse(y_validate,y_rigde_pointzeroone)) #lambda = 0.01
+y_rigde_pointone=predict(ridge_pointone,x_validate)
+print(rmse(y_validate,y_rigde_pointone)) #lambda = 0.1
+y_rigde_one=predict(ridge_one,x_validate)
+print(rmse(y_validate,y_rigde_one)) #lambda = 1
+y_rigde_ten=predict(ridge_ten,x_validate)
+print(rmse(y_validate,y_rigde_ten)) #lambda = 10
+```
+Lambda = 0.01 give the smallest RMSE, i.e 4.3464 for ridge model. Please note that the RMSE can be interpreted as the spreadness of residuals.
+
+For LASSO model :
+```{r}
+y_lasso_pointzeroone=predict(lasso_pointzeroone,x_validate)
+print(rmse(y_validate,y_lasso_pointzeroone)) #lambda = 0.01
+y_lasso_pointone=predict(lasso_pointone,x_validate)
+print(rmse(y_validate,y_lasso_pointone)) #lambda = 0.1
+y_lasso_one=predict(lasso_one,x_validate)
+print(rmse(y_validate,y_lasso_one)) #lambda = 1
+y_lasso_ten=predict(lasso_ten,x_validate)
+print(rmse(y_validate,y_lasso_ten)) #lambda = 10
+```
+Interestingly for the LASSO model, best value of RMSE is almost similar to ridge, i.e 4.341, and achieved with similar lambda = 0.01.
+
+Let's evalute the coefficient of best model:
+Ridge coefficient for lambda = 0.01 :
+```{r}
+coef(ridge_pointzeroone)
+```
+LASSO coefficient for lambda = 0.01 :
+```{r}
+coef(lasso_pointzeroone)
+```
+Compare both of them to the linear regression model also:
+```{r}
+linear_reg=lm(medv~.,data=train)
+summary(linear_reg)
+```
+RMSE for linear regression on validation data
+```{r}
+y_linear_validate=predict(linear_reg,newdata = validate)
+print(rmse(y_validate,y_linear_validate))
+```
+
+Based on these 3 models, we can obtain some insights such as :
+
+- From all models , one can see that the increase (by 1 unit value) of  crim, indus, nox, dis, tax, ptratio, and lstat will decrease the value of medv. Thus, we can say that some results are quite different intuitively from the previous one in the pairplots, in which age is associated with a negative correlation to medv and dis is associated with a positive correlation (all models identify dis gives negative impact to medv and age gives positive impact).
+
+- Interestingly, for ridge and LASSO model with lambda = 0.01, the coefficient results of each variable are not much different. For example, an increase of 1 unit value in ptratio, while other features are kept fixed, is associated with an increase of -0.904 unit value in medv according to LASSO model and -0.903 unit value in medv according to ridge model. This result is actually quite reasonable since the RMSE for both models are also approximately similar.
+
+- For ridge model, nox is the variable with the highest absolute coefficient value, i.e an increase of 1 unit value in nox, while other features are kept fixed, is associated with a decrease of -16.03 unit value in medv.
+
+- As stated before, quite similar result also found in LASSO model  where an increase of 1 unit value in nox, while other features are kept fixed, is associated with a decrease of -15.75 unit value in medv.
+
+## 5. Evaluate the best model on the test data. Use MAE, MAPE, and RMSE in the analysis
+
+Prepare the data once again
+```{r}
+x_test <- model.matrix(medv ~ ., test)[,-1]
+y_test <-  test$medv 
+```
+
+### MAE (Mean Absolute Error)
+
+For Ridge model :
+```{r}
+y_rigde_pointzeroone_test=predict(ridge_pointzeroone,x_test)
+print(mae(y_test,y_rigde_pointzeroone_test)) #lambda = 0.01
+```
+For LASSO model :
+```{r}
+y_lasso_pointzeroone_test=predict(lasso_pointzeroone,x_test)
+print(mae(y_test,y_lasso_pointzeroone_test)) #lambda = 0.01
+```
+For linear regression:
+```{r}
+y_linear_test=predict(linear_reg,newdata = test)
+print(mae(y_test,y_linear_test))
+```
+### MAPE (Mean Absolute Percentage Error)
+
+For Ridge model :
+```{r}
+print(mape(y_test,y_rigde_pointzeroone_test)) #lambda = 0.01
+```
+For LASSO model :
+```{r}
+print(mape(y_test,y_lasso_pointzeroone_test)) #lambda = 0.01
+```
+For linear regression:
+```{r}
+print(mape(y_test,y_linear_test))
+```
+### RMSE (Root Mean Square Error)
+
+For Ridge model :
+```{r}
+print(rmse(y_test,y_rigde_pointzeroone_test)) #lambda = 0.01
+```
+For LASSO model :
+```{r}
+print(rmse(y_test,y_lasso_pointzeroone_test)) #lambda = 0.01
+```
+For linear regression:
+```{r}
+print(rmse(y_test,y_linear_test))
+```
+From above results, we can interpret that :
+
+- MAE and MAPE measures the average of the residuals and they don't necessarily penalize large errors. In other words, MAE and MAPE answer the question, 'How far were you off in your predictions, on average?' . According to our analysis, all models such as LASSO, Ridge, and ordinary linear regression give MAE approximately 3.89 (our prediction is about $3890 off from the actual value on average) or roughly 17 percent (MAPE) deviation from the ground truth. Moreover, **we can say that all models perform quite similarly in terms of quality based on these metrics because there is no significant difference in MAE and MAPE results, even though the LASSO model performs slightly better with MAE 3.888 and MAPE 17.07 percent**.
+
+- RMSE is different compared to MAE and MAPE, since it measures the spreadness of the residuals value (standar deviation) hence it does penalize large errors. RMSE also tends to be higher than MAE as the sample size goes up. Based on the analysis, one can see that the RMSE value of test data is higher than the RMSE of validate data. For example in Ridge model, the RMSE raises from 4.341 to 6.82 , indicates that higher errors are almost certainly present in some test data observations (remember RMSE penalizes large erros more than MAE).  **Again there is no significant different in RMSE results, emphasizes that all models perform quite similarly in terms of quality. However, The Ridge model does have slightly smaller RMSE, i.e  6.82**.
+
+- Because there is no significant difference in the results based on all evaluation metrics, we can conclude that **all models, including Ridge, Lasso, and ordinary Linear Regression, perform similarly**.
+
+
+Due to the curiosity, I will also calculate the RMSE for Ridge and LASSO models for lambda = 0.1 and 1 since their RMSE on validate data are not much different.
+
+For Ridge model with lambda = 0.1, the RMSE is:
+```{r}
+y_rigde_pointone_test=predict(ridge_pointone,x_test)
+print(rmse(y_test,y_rigde_pointone_test)) #lambda = 0.1
+```
+For Ridge model with lambda = 1, the RMSE is:
+```{r}
+y_rigde_one_test=predict(ridge_one,x_test)
+print(rmse(y_test,y_rigde_one_test)) #lambda = 1
+```
+For LASSO model with lambda = 0.1, the RMSE is:
+```{r}
+y_lasso_pointone_test=predict(lasso_pointone,x_test)
+print(rmse(y_test,y_lasso_pointone_test)) #lambda = 0.1
+```
+
+For LASSO model with lambda = 1, the RMSE is:
+```{r}
+y_lasso_one_test=predict(lasso_one,x_test)
+print(rmse(y_test,y_lasso_one_test)) #lambda = 1
+```
+Unfortunately, raising the lambda does not give any better RMSE. This is however reasonable since as lambda increases, the coefficients become smaller -- the variance decreases hence the bias increases. The model then oversimplifies the data (for LASSO especially) and gives high errors.
+
+Lastly, let's do the classic assumption checking for the the models to identify what improvement can we do for better results. We will take the predicted values of Ridge model (lambda = 0.01) on the train data since there is no overfitting.
+
+Make a dataframe :
+```{r}
+df=df%>% select(-rad)
+x_tot <- model.matrix(medv ~ ., df)[,-1]
+y_tot <-  df$medv 
+y_predicted_tot=predict(ridge_pointzeroone,x_tot)
+check_df=data.frame(actual_values=y_tot,predicted_values=y_predicted_tot[,1])
+check_df[,'residual']=check_df$actual_values-check_df$predicted_values
+```
+Plot the predicted value and actual value of the train data
+```{r}
+ggplot(check_df,aes(x=actual_values,y=predicted_values))+geom_point()+geom_line(aes(y=actual_values,colour='y = x'))+labs(title='Predicted vs Actual Values on the train data')+scale_color_manual("",values=c('y = x'='tomato'))+theme_classic()+theme(legend.position=c(0.1,0.95),legend.background=element_blank())
+```
+
+```{r}
+p=ggplot(check_df,aes(x=actual_values,y=residual))+geom_point()+geom_hline(yintercept = 0,color='tomato')+labs(title='Residual Plot',y='Residual',x='Actual values',subtitle='Error may reduce with better treatment of the upper outliers')+theme_minimal()
+ggsave('medv_project.jng',p,dpi=1000,width=9,height=6)
+print(p)
+```
+
+From the plot, we can see that except for extreme maximum predicted values, the residual plot already fits the linearity, homoscedasticity, and no autocorrelation assumptions.
+
+Calculate the Variance Inflation Factor on train data to check the multicollinearity assumption once again. Since ridge and linear regression model perform approximately the same, we will use linear regression model to calculate it due to the ease of process.
+```{r,warning=FALSE,message=FALSE}
+library(car)
+vif(linear_reg)
+```
+Because all of the values are less than 10, I don't think we need to be concerned about the multicollinearity.
+
+Standardize the residual to check Normality assumption:
+```{r}
+standardize = function(x){
+  z <- (x - mean(x)) / sd(x)
+  return( z)
+}
+check_df[,'stdresidual'] <- standardize(check_df[,'residual'])
+```
+```{r}
+check_df
+```
+
+
+```{r}
+qqnorm(check_df$stdresidual,main = 'Q-Q Plot of Standardized Residual')
+qqline(check_df$stdresidual)
+```
+
+Even though the residuals are a little skewed, the plot shows that they do not violate the normality assumption.
+
+As a result of my curiosity, I discover that the dataset already meets all of the linear regression assumptions. So, in order to improve our accuracy in the future works, we can do:
+
+- Better treatment of the outliers (remove or impute).
+- Improve the quality of the dataset, apply some feature engineerings if needed.
+
+```{r}
+ggplot(df,aes(x=medv))+geom_boxplot()+labs(title='Boxplot of Medv in the dataset',subtitle='The improvement of accuracy may come with better treatment of the outliers')+theme(axis.text.y = element_blank(),axis.ticks.y = element_blank())
+```
+
+
