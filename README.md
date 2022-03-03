@@ -1,11 +1,11 @@
 # :star2:Boston Housing Prices : Predictive Learning with Regularized Regression:star2:
 
-This work contains predictive analysis of Boston Housing Prices dataset, with medv as target variable. The analysis is carried out by using Regularized Linear Regression such as Lasso and Ridge method and done in R (Rstudio).
+This work contains predictive analysis of Boston Housing Prices dataset, with medv as target variable. The analysis is carried out by using Regularized Linear Regression such as Lasso and Ridge method and done in R (Rstudio). 
 
 ![ide](https://img.shields.io/badge/RStudio-75AADB?style=for-the-badge&logo=RStudio&logoColor=white)
 ![kaggle](https://img.shields.io/badge/Kaggle-20BEFF?style=for-the-badge&logo=Kaggle&logoColor=white)
 
-Just in case you didn't know. The codes are contained in the .Rmd (Rmarkdown) file, whereas the results and codes are neatly combined in the .html file (knitted version of Rmarkdown). Feel free to download and open it 😃😉.
+Just in case you didn't know. The codes are contained in the .Rmd (Rmarkdown) file, whereas the results and codes are neatly combined in the .html file (knitted version of Rmarkdown). Feel free to download and open it [here](https://indrayantom.github.io/BostonHousingPrices_RegularizedRegression/)😃😉.
 
 ## Objectives
 The data is about predicting housing price (medv) in Boston city. All the features can be grouped into :
